@@ -150,7 +150,7 @@ while True:
         adjusted_time = time.localtime(time.time() + sys_timezone * 3600)
         tm_clock.numbers(adjusted_time[3], adjusted_time[4])
         tm_date.numbers(adjusted_time[2], adjusted_time[1])
-        micropython.mem_info()
+        # micropython.mem_info()
         # unsure why, but controller hangs if sleep is less than 1s
         time.sleep(1)
 
