@@ -7,4 +7,6 @@ CONFIG = {
 "timezone": 1,
 # IP or hostname for ntp server. Leave this as an empty string to use the default gw as an ntp server.
 "ntp_server": "europe.pool.ntp.org",
+# brightness values are 0 (low) - 7 (high)
+"display_brightness": 7,
 }
