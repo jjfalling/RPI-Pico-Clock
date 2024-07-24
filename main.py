@@ -3,19 +3,27 @@
 # if not using ntp server in config, then this assumes the net gw runs ntp.
 # ds rtc is used as a backup if ntp is unavailable.
 
-import ntptime
-import network
-import time
-from machine import Pin
-import rp2
-import mip
 import os
+import time
+
+import mip
+import network
+import ntptime
+import rp2
+from machine import Pin
+
 from settings import CONFIG
 
 VERSION = '1.0.1'
 
-led = Pin("LED", Pin.OUT)
-tz_switch = led = Pin(22, Pin.IN, Pin.PULL_UP)  # connect switch to ground
+TZ_SWITCH = LED = Pin(22, Pin.IN, Pin.PULL_UP)  # connect switch to ground
+TM_CLOCK_CLK_PIN = Pin(19)
+TM_CLOCK_DIO_PIN = Pin(18)
+TM_DATE_CLK_PIN = Pin(21)
+TM_DATE_DIO_PIN = Pin(20)
+DS3231_SDA_PIN = Pin(16)
+DS3231_SLC_PIN = Pin(17)
+LED = Pin("LED", Pin.OUT)
 
 ssid = CONFIG['wifi_ssid']
 password = CONFIG['wifi_password']
@@ -23,13 +31,23 @@ sys_timezone = CONFIG['timezone']  # tz offset w/o daylight savings
 rp2.country(CONFIG.get('wifi_country', 'NL'))
 ntp_server = CONFIG.get('ntp_server')
 display_brightness = CONFIG.get('display_brightness', 7)
+tm_clock = None
+tm_date = None
 
 def init_displays():
-    # define display pins here
-    tm_clock = tm1637.TM1637(clk=Pin(19), dio=Pin(18))
-    tm_date = tm1637.TM1637(clk=Pin(21), dio=Pin(20))
+    import tm1637
+    tm_clock = tm1637.TM1637(clk=TM_CLOCK_CLK_PIN, dio=TM_CLOCK_DIO_PIN)
+    tm_date = tm1637.TM1637(clk=TM_DATE_CLK_PIN, dio=TM_DATE_DIO_PIN)
     clear_display(tm_clock, tm_date)
     return tm_clock, tm_date
+
+
+def display_text(clock_disp, date_disp):
+    clear_display(tm_clock, tm_date)
+    tm_clock.show(clock_disp)
+    tm_clock.brightness(display_brightness)
+    tm_date.show(date_disp)
+    tm_date.brightness(display_brightness)
 
 
 def clear_display(tm_clock, tm_date):
@@ -58,11 +76,7 @@ def update_ntp():
     except Exception as e:
         print("NTP update failed: {}".format(e))
         try:
-            clear_display(tm_clock, tm_date)
-            tm_clock.show("ERR")
-            tm_clock.brightness(display_brightness)
-            tm_date.show("NTP")
-            tm_date.brightness(display_brightness)
+            display_text("ERR", "NTP")
 
         except:
             pass
@@ -72,18 +86,14 @@ def update_ntp():
             current_datetime = ds_rtc.datetime()
             # fudge the day of week as it isn't used in this prog and there is no point to calculate it
             import machine
-            machine.RTC().datetime((current_datetime[0], current_datetime[1], current_datetime[2], 0, current_datetime[3], current_datetime[4], current_datetime[5], 0))
+            machine.RTC().datetime((current_datetime[0], current_datetime[1], current_datetime[2], 0,
+                                    current_datetime[3], current_datetime[4], current_datetime[5], 0))
             print("Updated system datetime from external RTC".format(e))
             print("Local time after reading from external RTC: %s" % str(time.localtime()))
 
         except Exception as err:
             print("RTC update failed: {}".format(err))
-
-            clear_display(tm_clock, tm_date)
-            tm_clock.show("ERR")
-            tm_clock.brightness(display_brightness)
-            tm_date.show("RTC")
-            tm_date.brightness(display_brightness)
+            display_text("ERR", "RTC")
 
         # try to update again in 60 sec
         last_ntp_update = time.time() - 21540
@@ -92,26 +102,20 @@ def update_ntp():
     return
 
 
-# try to display boot msg, if display lib is installed
-try:
-    import tm1637
-
-    tm_clock, tm_date = init_displays()
-    tm_clock.show("BOOT")
-    tm_clock.brightness(display_brightness)
-    tm_date.show("-ING")
-    tm_date.brightness(display_brightness)
-
-except Exception as err:
-    pass
-
 print('RPI Pico Clock Version: %s' % VERSION)
 
 # blink on boot
 time.sleep(0.25)
-led.high()
+LED.high()
 time.sleep(0.25)
-led.low()
+LED.low()
+
+# try to init display here, if lib isn't installed then just wait
+try:
+    tm_clock, tm_date = init_displays()
+    display_text("BOOT", "ING")
+except:
+    pass
 
 wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
@@ -131,33 +135,28 @@ last_ntp_update = 0
 if not file_or_dir_exists('lib/tm1637.py'):
     mip.install('github:mcauser/micropython-tm1637/tm1637.py')
 if not file_or_dir_exists('lib/ds3231.py'):
-   mip.install('github:HAIZAKURA/esp-ds3231-micropython/ds3231.py')
+    mip.install('github:HAIZAKURA/esp-ds3231-micropython/ds3231.py')
 
-import tm1637
 from ds3231 import DS3231
+ds_rtc = DS3231(0, sdapin=DS3231_SDA_PIN, sclpin=DS3231_SLC_PIN)
 
-tm_clock = tm1637.TM1637(clk=Pin(19), dio=Pin(18))
-tm_date = tm1637.TM1637(clk=Pin(21), dio=Pin(20))
-clear_display(tm_clock, tm_date)
-ds_rtc = DS3231(0, sdapin=16, sclpin=17)
+# init displays if not done already
+if not tm_clock or not tm_date:
+    tm_clock, tm_date = init_displays()
+    display_text("BOOT", "ING")
 
 # Handle connection error
 if wlan.status() != 3:
     print('network connection failed')
-    tm_clock.show("WIFI")
-    tm_clock.brightness(display_brightness)
-    tm_date.show("ERR")
-    tm_date.brightness(display_brightness)
+    display_text("ERR", "WIFI")
+
     time.sleep(5)
 
 else:
-    tm_clock.show("WIFI")
-    tm_clock.brightness(display_brightness)
-    tm_date.show("UP")
-    tm_date.brightness(display_brightness)
     print('wifi connected')
+    display_text("WIFI", " UP")
     time.sleep(1)
-    led.high()
+    LED.high()
     status = wlan.ifconfig()
     print('device ip: ' + status[0])
 
@@ -175,7 +174,7 @@ else:
 while True:
     try:
         # local time is non-dst aware, so adjust when displaying
-        if tz_switch.value():
+        if TZ_SWITCH.value():
             real_sys_timezone = sys_timezone + 1
         else:
             real_sys_timezone = sys_timezone
@@ -186,8 +185,10 @@ while True:
         tm_clock.brightness(display_brightness)
         tm_date.numbers(adjusted_time[2], adjusted_time[1])
         tm_date.brightness(display_brightness)
+
         # micropython.mem_info()
         # unsure why, but controller hangs if sleep is less than 1s
+
         time.sleep(1)
 
         # update ntp every 6 hours
@@ -195,7 +196,4 @@ while True:
             update_ntp()
     except Exception as err:
         print("Encountered error in main loop" + str(err))
-        tm_clock.show("SYS")
-        tm_clock.brightness(display_brightness)
-        tm_date.show("ERR")
-        tm_date.brightness(display_brightness)
+        display_text("ERR", "SYS")
